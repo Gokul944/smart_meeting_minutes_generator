@@ -1,0 +1,6 @@
+venv/
+uploads/
+segments/
+__pycache__/
+*.pyc
+.whisper/
