@@ -35,6 +35,9 @@ if "actions" not in st.session_state:
 if "metadata" not in st.session_state:
     st.session_state.metadata = {}
 
+if "minutes_text" not in st.session_state:
+    st.session_state.minutes_text = ""
+
 # ---------------------------------------------------
 # FILE UPLOAD
 # ---------------------------------------------------
@@ -64,13 +67,14 @@ if uploaded_file is not None:
                 progress.progress(10)
                 status.text("Analyzing audio...")
 
-                overall, speaker_summaries, actions, metadata = process_meeting(upload_path)
+                overall, speaker_summaries, actions, metadata, minutes_text = process_meeting(upload_path)
 
                 # SAVE RESULTS TO SESSION STATE
                 st.session_state.overall = overall
                 st.session_state.speaker_summaries = speaker_summaries
                 st.session_state.actions = actions
                 st.session_state.metadata = metadata
+                st.session_state.minutes_text = minutes_text
                 st.session_state.processed = True
 
                 progress.progress(100)
@@ -94,19 +98,19 @@ if st.session_state.processed:
         else:
             st.write(f"**{k}:** {v}")
 
-    # -------- OVERALL SUMMARY --------
-    st.subheader("🧾 Overall Summary")
-    st.write(st.session_state.overall)
+    # -------- STRUCTURED MINUTES --------
+    st.subheader("🧾 Structured Meeting Minutes")
+    st.text(st.session_state.minutes_text)
 
-    # -------- SPEAKER SUMMARY --------
+    # -------- SPEAKER-WISE SUMMARY (visible) --------
     st.subheader("👥 Speaker-wise Summary")
     for sp, txt in st.session_state.speaker_summaries.items():
         st.markdown(f"**{sp}:** {txt}")
 
-    # -------- ACTION ITEMS --------
-    st.subheader("✅ Action Items")
-    for a in st.session_state.actions:
-        st.write(f"- {a}")
+    # -------- ACTION ITEMS (raw sentences, optional) --------
+    with st.expander("✅ Raw Action Sentences (debug view)", expanded=False):
+        for a in st.session_state.actions:
+            st.write(f"- {a}")
 
     # ======================================================
     # DOWNLOAD SECTION
@@ -114,19 +118,8 @@ if st.session_state.processed:
     st.subheader("⬇️ Download Meeting Minutes")
 
     # -------- TXT --------
-    text_content = f"""
-MEETING METADATA
-{st.session_state.metadata}
-
-OVERALL SUMMARY
-{st.session_state.overall}
-
-SPEAKER SUMMARIES
-{st.session_state.speaker_summaries}
-
-ACTION ITEMS
-{st.session_state.actions}
-"""
+    # Use the structured minutes text as the TXT content
+    text_content = st.session_state.minutes_text or ""
 
     st.download_button(
         "📄 Download as TXT",
@@ -137,20 +130,9 @@ ACTION ITEMS
     # -------- DOCX --------
     doc = Document()
     doc.add_heading("Meeting Minutes", level=1)
-
-    for k, v in st.session_state.metadata.items():
-        doc.add_paragraph(f"{k}: {v}")
-
-    doc.add_heading("Overall Summary", level=2)
-    doc.add_paragraph(st.session_state.overall)
-
-    doc.add_heading("Speaker-wise Summary", level=2)
-    for sp, txt in st.session_state.speaker_summaries.items():
-        doc.add_paragraph(f"{sp}: {txt}")
-
-    doc.add_heading("Action Items", level=2)
-    for a in st.session_state.actions:
-        doc.add_paragraph(f"- {a}")
+    # Write the structured minutes text into the DOCX
+    for line in (st.session_state.minutes_text or "").splitlines():
+        doc.add_paragraph(line)
 
     doc_io = BytesIO()
     doc.save(doc_io)
@@ -169,12 +151,14 @@ ACTION ITEMS
 
     story = []
     story.append(Paragraph("<b>Meeting Minutes</b>", styles["Title"]))
-    story.append(Paragraph("<b>Overall Summary</b>", styles["Heading2"]))
-    story.append(Paragraph(st.session_state.overall, styles["Normal"]))
-
-    story.append(Paragraph("<b>Action Items</b>", styles["Heading2"]))
-    for a in st.session_state.actions:
-        story.append(Paragraph(f"- {a}", styles["Normal"]))
+    for line in (st.session_state.minutes_text or "").splitlines():
+        # Use simple paragraphs per line
+        if line.strip().startswith("- "):
+            story.append(Paragraph(line, styles["Normal"]))
+        elif line.strip().endswith(":"):
+            story.append(Paragraph(f"<b>{line}</b>", styles["Heading2"]))
+        else:
+            story.append(Paragraph(line, styles["Normal"]))
 
     pdf.build(story)
     pdf_io.seek(0)
