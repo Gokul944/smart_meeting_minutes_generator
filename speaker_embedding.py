@@ -1,8 +1,20 @@
 # speaker_embedding.py
 from resemblyzer import VoiceEncoder, preprocess_wav
+import threading
 
-# Load encoder once (important for performance)
-encoder = VoiceEncoder()
+encoder = None
+encoder_lock = threading.Lock()
+
+
+def _get_encoder():
+    """Load embedding encoder on first use (prevents slow Streamlit startup)."""
+    global encoder
+    if encoder is not None:
+        return encoder
+    with encoder_lock:
+        if encoder is None:
+            encoder = VoiceEncoder()
+    return encoder
 
 def extract_embeddings(segment_files):
     """
@@ -25,7 +37,7 @@ def extract_embeddings(segment_files):
             continue
 
         # Generate speaker embedding
-        emb = encoder.embed_utterance(wav)
+        emb = _get_encoder().embed_utterance(wav)
         embeddings.append(emb)
 
     return embeddings

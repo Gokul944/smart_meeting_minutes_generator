@@ -7,7 +7,9 @@ from speaker_embedding import extract_embeddings
 from clustering import cluster_speakers
 from stt import transcribe
 from rule_nlp import summarize, extract_actions, extract_decisions
+from llm_minutes import generate_minutes_with_gemini, has_gemini
 import re
+from collections import Counter
 
 # ------------------ METADATA PARSER ------------------
 def extract_metadata(transcript: str) -> dict:
@@ -95,16 +97,42 @@ def extract_metadata(transcript: str) -> dict:
             "May", "Jun", "June", "Jul", "July", "Aug", "August",
             "Sep", "Sept", "September", "Oct", "October", "Nov", "November",
             "Dec", "December",
+            # Common non-name words that can appear capitalized at sentence starts
+            "So", "Confident",
         }
+        # If you already know the likely attendee names, allow them even if they appear once.
+        # This prevents returning an empty attendee list when each name only appears a single time.
+        likely_person_names = {
+            "Gokul",
+            "Dani",
+            "Akash",
+            "Arunima",
+            "Lekshmi",
+        }
+        # Only keep likely person names:
+        # - not in ignore list
+        # - looks like a real name (length >= 3)
+        # - appears at least twice in the transcript (reduces false positives),
+        #   OR is in the likely-person allowlist above.
+        counts = Counter(
+            n for n in name_candidates
+            if n not in ignore_names and len(n) >= 3
+        )
+        valid = {
+            name
+            for name, c in counts.items()
+            if (c >= 2) or (name in likely_person_names)
+        }
+
+        # Preserve the order of first appearance in the transcript
+        ordered = []
         seen = set()
-        inferred = []
         for name in name_candidates:
-            if name in ignore_names:
-                continue
-            if name not in seen:
+            if name in valid and name not in seen:
                 seen.add(name)
-                inferred.append(name)
-        attendees_list = inferred
+                ordered.append(name)
+
+        attendees_list = ordered
 
     metadata["Attendees"] = attendees_list if attendees_list else []
 
@@ -303,7 +331,7 @@ def build_structured_minutes(
     return "\n".join(lines)
 
 # ------------------ MAIN PIPELINE ------------------
-def process_meeting(audio_path, n_speakers=DEFAULT_SPEAKERS):
+def process_meeting(audio_path, n_speakers=DEFAULT_SPEAKERS, use_llm: bool = False, gemini_api_key=None):
     """
     Full meeting minutes pipeline:
     Audio → VAD → Speaker Embeddings → Clustering → STT → Summaries → Metadata
@@ -358,9 +386,22 @@ def process_meeting(audio_path, n_speakers=DEFAULT_SPEAKERS):
     metadata = extract_metadata(overall_text)
 
     # 10. Build structured minutes text
-    minutes_text = build_structured_minutes(metadata, overall_text, actions)
+    minutes_text = ""
+    gemini_error = None
+    if use_llm and has_gemini(gemini_api_key):
+        # Build transcript with speaker labels so LLM can convert dialogue → "what happened"
+        transcript_with_speakers = "\n\n".join(
+            f"{speaker}:\n{text}" for speaker, text in speaker_text.items() if text
+        ).strip() or overall_text
+        minutes_text, gemini_error = generate_minutes_with_gemini(
+            transcript_with_speakers, metadata, api_key=gemini_api_key
+        )
 
-    return overall_summary, speaker_summaries, actions, metadata, minutes_text
+    # Fallback to rule-based minutes if LLM is disabled or failed/empty
+    if not minutes_text:
+        minutes_text = build_structured_minutes(metadata, overall_text, actions)
+
+    return overall_summary, speaker_summaries, actions, metadata, minutes_text, gemini_error
 
 # ------------------ RUN SCRIPT ------------------
 if __name__ == "__main__":
@@ -372,10 +413,13 @@ if __name__ == "__main__":
         exit(1)
 
     try:
-        overall, speaker_summaries, actions, metadata, minutes_text = process_meeting(audio_path)
+        overall, speaker_summaries, actions, metadata, minutes_text, gemini_error = process_meeting(audio_path)
     except Exception as e:
         print("❌ Error processing meeting:", e)
         exit(1)
+
+    if gemini_error:
+        print("⚠️ Gemini API failed (rule-based minutes used):", gemini_error)
 
     print("\n=============== METADATA ===============\n")
     for key, value in metadata.items():

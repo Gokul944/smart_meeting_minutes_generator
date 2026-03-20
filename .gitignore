@@ -1,4 +1,5 @@
 venv/
+.env
 uploads/
 segments/
 __pycache__/

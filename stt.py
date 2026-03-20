@@ -1,8 +1,21 @@
 import whisper
 import re
+import threading
 from config import WHISPER_MODEL
 
-_model = whisper.load_model(WHISPER_MODEL)
+_model = None
+_model_lock = threading.Lock()
+
+
+def _get_model():
+    """Load Whisper model on first use (prevents slow Streamlit startup)."""
+    global _model
+    if _model is not None:
+        return _model
+    with _model_lock:
+        if _model is None:
+            _model = whisper.load_model(WHISPER_MODEL)
+    return _model
 
 
 def _clean_transcription(text: str) -> str:
@@ -48,7 +61,8 @@ def transcribe(audio_path):
     Transcribe audio with improved Whisper settings.
     Uses language hint and prompt for better accuracy.
     """
-    result = _model.transcribe(
+    model = _get_model()
+    result = model.transcribe(
         audio_path,
         fp16=False,
         language="en",  # Explicitly set English

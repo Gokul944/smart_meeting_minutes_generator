@@ -38,6 +38,9 @@ if "metadata" not in st.session_state:
 if "minutes_text" not in st.session_state:
     st.session_state.minutes_text = ""
 
+if "gemini_error" not in st.session_state:
+    st.session_state.gemini_error = None
+
 # ---------------------------------------------------
 # FILE UPLOAD
 # ---------------------------------------------------
@@ -45,6 +48,20 @@ uploaded_file = st.file_uploader(
     "Upload audio file",
     type=["wav", "mp3", "m4a"]
 )
+
+# Optional: LLM toggle and API key
+use_gemini = st.checkbox(
+    "Use Google Gemini LLM for minutes (converts dialogue into formal 'what happened' minutes)",
+    value=False,
+)
+gemini_api_key = None
+if use_gemini:
+    gemini_api_key = st.text_input(
+        "Gemini API Key (or set GEMINI_API_KEY in .env / environment)",
+        type="password",
+        placeholder="Paste your API key here, or leave blank if set in .env",
+        help="Get a key at https://aistudio.google.com/apikey",
+    )
 
 # ---------------------------------------------------
 # PROCESS BUTTON (BEST PRACTICE)
@@ -67,7 +84,11 @@ if uploaded_file is not None:
                 progress.progress(10)
                 status.text("Analyzing audio...")
 
-                overall, speaker_summaries, actions, metadata, minutes_text = process_meeting(upload_path)
+                overall, speaker_summaries, actions, metadata, minutes_text, gemini_error = process_meeting(
+                    upload_path,
+                    use_llm=use_gemini,
+                    gemini_api_key=gemini_api_key if use_gemini else None,
+                )
 
                 # SAVE RESULTS TO SESSION STATE
                 st.session_state.overall = overall
@@ -75,12 +96,15 @@ if uploaded_file is not None:
                 st.session_state.actions = actions
                 st.session_state.metadata = metadata
                 st.session_state.minutes_text = minutes_text
+                st.session_state.gemini_error = gemini_error
                 st.session_state.processed = True
 
                 progress.progress(100)
                 status.text("Processing completed")
 
             st.success("✅ Meeting minutes generated successfully!")
+            if st.session_state.gemini_error:
+                st.warning("⚠️ Gemini API failed (rule-based minutes used): " + st.session_state.gemini_error)
 
         except Exception as e:
             st.error(f"❌ Error: {e}")
@@ -106,11 +130,6 @@ if st.session_state.processed:
     st.subheader("👥 Speaker-wise Summary")
     for sp, txt in st.session_state.speaker_summaries.items():
         st.markdown(f"**{sp}:** {txt}")
-
-    # -------- ACTION ITEMS (raw sentences, optional) --------
-    with st.expander("✅ Raw Action Sentences (debug view)", expanded=False):
-        for a in st.session_state.actions:
-            st.write(f"- {a}")
 
     # ======================================================
     # DOWNLOAD SECTION
