@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import re
 from app import process_meeting
 from io import BytesIO
 from docx import Document
@@ -122,6 +123,68 @@ if st.session_state.processed:
         else:
             st.write(f"**{k}:** {v}")
 
+    # -------- EDIT MISSING METADATA --------
+    meta = st.session_state.metadata
+    date_missing = meta.get("Date", "Not found") == "Not found"
+    time_missing = meta.get("Time", "Not found") == "Not found"
+    location_missing = meta.get("Location", "Not found") == "Not found"
+
+    if date_missing or time_missing or location_missing:
+        st.subheader("✏️ Edit Missing Metadata")
+        st.caption("Some metadata was not detected from the audio. You can enter it manually below.")
+
+        new_date = ""
+        new_time = ""
+        new_location = ""
+
+        if date_missing:
+            new_date = st.text_input("📅 Date", placeholder="e.g. March 23, 2026", key="input_date")
+        if time_missing:
+            new_time = st.text_input("🕐 Time", placeholder="e.g. 3:00 PM", key="input_time")
+        if location_missing:
+            new_location = st.text_input("📍 Location", placeholder="e.g. Conference Room B", key="input_location")
+
+        if st.button("✅ Apply Changes"):
+            updated = False
+            minutes = st.session_state.minutes_text
+
+            if date_missing and new_date.strip():
+                st.session_state.metadata["Date"] = new_date.strip()
+                minutes = re.sub(
+                    r"(?i)^Date:\s*Not Mentioned.*$",
+                    f"Date: {new_date.strip()}",
+                    minutes,
+                    flags=re.MULTILINE,
+                )
+                updated = True
+
+            if time_missing and new_time.strip():
+                st.session_state.metadata["Time"] = new_time.strip()
+                minutes = re.sub(
+                    r"(?i)^Time:\s*Not Mentioned.*$",
+                    f"Time: {new_time.strip()}",
+                    minutes,
+                    flags=re.MULTILINE,
+                )
+                updated = True
+
+            if location_missing and new_location.strip():
+                st.session_state.metadata["Location"] = new_location.strip()
+                minutes = re.sub(
+                    r"(?i)^Location:\s*Not Mentioned.*$",
+                    f"Location: {new_location.strip()}",
+                    minutes,
+                    flags=re.MULTILINE,
+                )
+                updated = True
+
+            if updated:
+                st.session_state.minutes_text = minutes
+                st.success("✅ Metadata updated! The downloads below now include your changes.")
+                st.rerun()
+            else:
+                st.warning("⚠️ Please fill in at least one field before applying.")
+
     # -------- STRUCTURED MINUTES --------
     st.subheader("🧾 Structured Meeting Minutes")
     st.text(st.session_state.minutes_text)
@@ -132,13 +195,23 @@ if st.session_state.processed:
         st.markdown(f"**{sp}:** {txt}")
 
     # ======================================================
+    # BUILD SPEAKER-WISE SUMMARY TEXT FOR DOWNLOADS
+    # ======================================================
+    speaker_lines = []
+    if st.session_state.speaker_summaries:
+        speaker_lines.append("")
+        speaker_lines.append("SPEAKER-WISE SUMMARY:")
+        for sp, txt in st.session_state.speaker_summaries.items():
+            speaker_lines.append(f"- {sp}: {txt}")
+    speaker_summary_text = "\n".join(speaker_lines)
+
+    # ======================================================
     # DOWNLOAD SECTION
     # ======================================================
     st.subheader("⬇️ Download Meeting Minutes")
 
     # -------- TXT --------
-    # Use the structured minutes text as the TXT content
-    text_content = st.session_state.minutes_text or ""
+    text_content = (st.session_state.minutes_text or "") + speaker_summary_text
 
     st.download_button(
         "📄 Download as TXT",
@@ -149,8 +222,8 @@ if st.session_state.processed:
     # -------- DOCX --------
     doc = Document()
     doc.add_heading("Meeting Minutes", level=1)
-    # Write the structured minutes text into the DOCX
-    for line in (st.session_state.minutes_text or "").splitlines():
+    full_text = (st.session_state.minutes_text or "") + speaker_summary_text
+    for line in full_text.splitlines():
         doc.add_paragraph(line)
 
     doc_io = BytesIO()
@@ -170,8 +243,8 @@ if st.session_state.processed:
 
     story = []
     story.append(Paragraph("<b>Meeting Minutes</b>", styles["Title"]))
-    for line in (st.session_state.minutes_text or "").splitlines():
-        # Use simple paragraphs per line
+    full_text_pdf = (st.session_state.minutes_text or "") + speaker_summary_text
+    for line in full_text_pdf.splitlines():
         if line.strip().startswith("- "):
             story.append(Paragraph(line, styles["Normal"]))
         elif line.strip().endswith(":"):

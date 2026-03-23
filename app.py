@@ -7,7 +7,7 @@ from speaker_embedding import extract_embeddings
 from clustering import cluster_speakers
 from stt import transcribe
 from rule_nlp import summarize, extract_actions, extract_decisions
-from llm_minutes import generate_minutes_with_gemini, has_gemini
+from llm_minutes import generate_minutes_with_gemini, has_gemini, convert_speaker_summaries_to_reported
 import re
 from collections import Counter
 
@@ -378,6 +378,12 @@ def process_meeting(audio_path, n_speakers=DEFAULT_SPEAKERS, use_llm: bool = Fal
     # Use slightly shorter summaries so we focus on purpose instead of full dialogue
     overall_summary = summarize(overall_text, 4)
     speaker_summaries = {sp: summarize(txt, 2) for sp, txt in speaker_text.items()}
+
+    # 7b. Convert speaker summaries to reported speech (if LLM enabled)
+    if use_llm and has_gemini(gemini_api_key):
+        speaker_summaries = convert_speaker_summaries_to_reported(
+            speaker_summaries, api_key=gemini_api_key
+        )
 
     # 8. Action items
     actions = extract_actions(overall_text)

@@ -138,3 +138,79 @@ Transcript:
     except Exception as e:
         logging.error("Error calling Gemini API: %s", e)
         return "", str(e)
+
+
+def convert_speaker_summaries_to_reported(
+    speaker_summaries: Dict[str, str],
+    api_key: Optional[str] = None,
+) -> Dict[str, str]:
+    """
+    Convert speaker-wise summaries from direct speech to reported (third-person) speech
+    using Gemini. Returns the original summaries unchanged on failure.
+    """
+    if not speaker_summaries or not has_gemini(api_key):
+        return speaker_summaries
+
+    key = _get_api_key(api_key)
+    if not key:
+        return speaker_summaries
+
+    # Build a single prompt with all speakers
+    speaker_block = "\n".join(
+        f"{speaker}: {text}" for speaker, text in speaker_summaries.items() if text
+    )
+
+    prompt = f"""Convert the following speaker-wise meeting summaries from DIRECT speech to REPORTED (third-person) speech.
+
+Rules:
+1. Convert first-person ("I will...", "I can...") to third-person ("Offered to...", "Volunteered to...").
+2. Convert questions ("Have you decided...?") to reported form ("Asked whether the team had decided...").
+3. Keep it concise — short bullet-style sentences, no unnecessary words.
+4. Do NOT add new information. Only rephrase what is already there.
+5. Return EXACTLY the same speaker labels (e.g. "Speaker 1:", "Speaker 2:") followed by the converted text.
+6. Do NOT include any extra commentary, headings, or markdown formatting.
+
+Input:
+{speaker_block}
+
+Output (same format, reported speech):"""
+
+    try:
+        if _using_new_sdk:
+            client = _genai_new.Client(api_key=key)
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+            )
+            text = (getattr(response, "text", None) or "").strip()
+        else:
+            _genai_old.configure(api_key=key)
+            model = _genai_old.GenerativeModel(GEMINI_MODEL)
+            response = model.generate_content(prompt)
+            text = (response.text or "").strip()
+
+        if not text:
+            return speaker_summaries
+
+        # Parse the response back into a dict
+        import re
+        converted = {}
+        # Match lines like "Speaker 1: ..." or "Speaker 2: ..."
+        pattern = re.compile(r"^(Speaker\s+\d+)\s*:\s*(.+)", re.MULTILINE)
+        for match in pattern.finditer(text):
+            label = match.group(1).strip()
+            content = match.group(2).strip()
+            converted[label] = content
+
+        # Only use converted if we got results for all speakers
+        if len(converted) >= len(speaker_summaries):
+            return converted
+        else:
+            # Partial match — merge with originals
+            result = dict(speaker_summaries)
+            result.update(converted)
+            return result
+
+    except Exception as e:
+        logging.error("Error converting speaker summaries to reported speech: %s", e)
+        return speaker_summaries
