@@ -128,14 +128,16 @@ if st.session_state.processed:
     date_missing = meta.get("Date", "Not found") == "Not found"
     time_missing = meta.get("Time", "Not found") == "Not found"
     location_missing = meta.get("Location", "Not found") == "Not found"
+    attendees_missing = not meta.get("Attendees")  # empty list or missing
 
-    if date_missing or time_missing or location_missing:
+    if date_missing or time_missing or location_missing or attendees_missing:
         st.subheader("✏️ Edit Missing Metadata")
         st.caption("Some metadata was not detected from the audio. You can enter it manually below.")
 
         new_date = ""
         new_time = ""
         new_location = ""
+        new_attendees_raw = ""
 
         if date_missing:
             new_date = st.text_input("📅 Date", placeholder="e.g. March 23, 2026", key="input_date")
@@ -143,6 +145,13 @@ if st.session_state.processed:
             new_time = st.text_input("🕐 Time", placeholder="e.g. 3:00 PM", key="input_time")
         if location_missing:
             new_location = st.text_input("📍 Location", placeholder="e.g. Conference Room B", key="input_location")
+        if attendees_missing:
+            new_attendees_raw = st.text_area(
+                "👥 Attendees",
+                placeholder="Enter attendee names, one per line:\nAlice\nBob\nCharlie",
+                key="input_attendees",
+                height=120,
+            )
 
         if st.button("✅ Apply Changes"):
             updated = False
@@ -177,6 +186,28 @@ if st.session_state.processed:
                     flags=re.MULTILINE,
                 )
                 updated = True
+
+            if attendees_missing and new_attendees_raw.strip():
+                # Parse names (one per line), strip whitespace, ignore blanks
+                new_attendees = [
+                    name.strip()
+                    for name in new_attendees_raw.splitlines()
+                    if name.strip()
+                ]
+                if new_attendees:
+                    st.session_state.metadata["Attendees"] = new_attendees
+                    # Build the replacement block for minutes_text
+                    attendee_block = "Attendees:\n" + "\n".join(
+                        f"- {name}" for name in new_attendees
+                    )
+                    # Replace "Attendees: Not Mentioned" (single line) with the block
+                    minutes = re.sub(
+                        r"(?i)^Attendees:\s*Not Mentioned.*$",
+                        attendee_block,
+                        minutes,
+                        flags=re.MULTILINE,
+                    )
+                    updated = True
 
             if updated:
                 st.session_state.minutes_text = minutes

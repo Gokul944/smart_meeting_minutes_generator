@@ -19,19 +19,21 @@ def extract_metadata(transcript: str) -> dict:
     """
     metadata = {}
 
-    # Date - improved pattern
+    # Date - improved pattern (year is now optional so "March 26" also matches)
     date_match = re.search(
         r"\b(?:Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|"
-        r"Sep|Sept|September|Oct|October|Nov|November|Dec|December)\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+of\s+)?\d{4}",
+        r"Sep|Sept|September|Oct|October|Nov|November|Dec|December)"
+        r"\s+\d{1,2}(?:st|nd|rd|th)?(?:[,\s]+\d{4})?",
         transcript,
         re.IGNORECASE
     )
-    metadata["Date"] = date_match.group(0) if date_match else "Not found"
+    metadata["Date"] = date_match.group(0).strip() if date_match else "Not found"
 
     # Time - more specific pattern to avoid matching "105 PM" as time
+    # Also accept dot as hour:minute separator (e.g. "10.30 am")
     time_patterns = [
-        r"\b(?:at|starting at|begins at)\s+(?:exactly\s*)?(\d{1,2}(?::\d{2})?\s*(?:am|pm|AM|PM))\b",
-        r"\b(\d{1,2}(?::\d{2})?\s*(?:am|pm|AM|PM))\b",
+        r"\b(?:at|starting at|begins at|for|scheduled for)\s+(?:exactly\s*)?(\d{1,2}(?:[.:]+\d{2})?\s*(?:am|pm|AM|PM|a\.m\.|p\.m\.))\b",
+        r"\b(\d{1,2}(?:[.:]+\d{2})?\s*(?:am|pm|AM|PM|a\.m\.|p\.m\.))\b",
     ]
     time_match = None
     for pattern in time_patterns:
@@ -40,7 +42,7 @@ def extract_metadata(transcript: str) -> dict:
             # Extract just the time part, not "exactly"
             time_str = time_match.group(1) if time_match.lastindex else time_match.group(0)
             # Validate it's a reasonable time (not "105 PM")
-            if re.match(r'\d{1,2}(?::\d{2})?\s*(?:am|pm|AM|PM)', time_str):
+            if re.match(r'\d{1,2}(?:[.:]\d{2})?\s*(?:am|pm|AM|PM|a\.m\.|p\.m\.)', time_str):
                 hour_part = re.match(r'(\d{1,2})', time_str)
                 if hour_part and int(hour_part.group(1)) <= 12:
                     metadata["Time"] = time_str.strip()
